@@ -45,5 +45,37 @@ def test_transition_task_spec_has_no_benchmark_settings() -> None:
         })
 
 
-# Backward compat alias
-test_task_spec_forbids_split_and_metrics = test_transition_task_spec_has_no_benchmark_settings
+def test_history_selection_rejects_non_positive_window() -> None:
+    """HistorySelection window_size must be strictly positive (> 0)."""
+    with pytest.raises(InvalidInputError, match="window_size must be > 0"):
+        HistorySelection(window_size=0)
+
+    with pytest.raises(InvalidInputError, match="window_size must be > 0"):
+        HistorySelection(window_size=-3)
+
+
+def test_history_selection_rejects_non_positive_step() -> None:
+    """HistorySelection step must be strictly positive (> 0)."""
+    with pytest.raises(InvalidInputError, match="step must be > 0"):
+        HistorySelection(window_size=4, step=0)
+
+    with pytest.raises(InvalidInputError, match="step must be > 0"):
+        HistorySelection(window_size=4, step=-1)
+
+
+def test_target_policy_rejects_non_positive_horizon() -> None:
+    """TargetTimePolicy horizon must be strictly positive (> 0)."""
+    with pytest.raises(InvalidInputError, match="horizon must be > 0"):
+        TargetTimePolicy(horizon=0)
+
+    with pytest.raises(InvalidInputError, match="horizon must be > 0"):
+        TargetTimePolicy(horizon=-2)
+
+
+def test_target_policy_rejects_non_positive_lead_time() -> None:
+    """TargetTimePolicy lead_times must be strictly positive (> 0)."""
+    with pytest.raises(InvalidInputError, match="lead_times must be strictly positive"):
+        TargetTimePolicy(lead_times=[0.0])
+
+    with pytest.raises(InvalidInputError, match="lead_times must be strictly positive"):
+        TargetTimePolicy(lead_times=[-1.5])

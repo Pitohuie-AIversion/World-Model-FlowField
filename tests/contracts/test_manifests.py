@@ -1,5 +1,6 @@
-"""Tests for DatasetManifest, ModelCapabilities, and ModelManifest."""
+import pytest
 
+from world_model.contracts.errors import InvalidInputError
 from world_model.contracts.manifests import (
     DatasetManifest,
     ModelCapabilities,
@@ -12,36 +13,41 @@ def test_dataset_manifest_has_no_fixed_grid_requirement(
     sample_dataset_manifest: DatasetManifest,
 ) -> None:
     """DatasetManifest must accommodate arbitrary grid resolutions and shapes."""
-    # Custom 3D resolution or atypical shape
-    custom_manifest = sample_dataset_manifest.model_copy(
-        update={
-            "dataset_id": "the_well_rayleigh_benard_3d",
-            "spatial_metadata": {
-                "axes": ["z", "y", "x"],
-                "shape": [64, 512, 1024],
-                "grid_type": "staggered_cartesian",
-            },
-        }
-    )
-    d = custom_manifest.to_dict()
-    assert d["spatial_metadata"]["shape"] == [64, 512, 1024]
+    d = sample_dataset_manifest.to_dict()
+    d["dataset_id"] = "the_well_rayleigh_benard_3d"
+    d["spatial_metadata"] = {
+        "axes": ["z", "y", "x"],
+        "shape": [64, 512, 1024],
+        "grid_type": "staggered_cartesian",
+    }
+    custom_manifest = DatasetManifest.from_dict(d)
+    assert custom_manifest.spatial_metadata["shape"] == [64, 512, 1024]
 
-    restored = DatasetManifest.from_dict(d)
+    restored = DatasetManifest.from_dict(custom_manifest.to_dict())
     assert restored.spatial_metadata["shape"] == [64, 512, 1024]
 
-    # Verify no specific shape is hardcoded as a requirement
-    # Single dim grid should also be accepted
-    tiny_manifest = sample_dataset_manifest.model_copy(
-        update={
-            "dataset_id": "custom_1d_dataset",
-            "spatial_metadata": {"axes": ["x"], "shape": [42]},
-        }
-    )
+
+def test_dataset_manifest_allows_variable_grid_shape(
+    sample_dataset_manifest: DatasetManifest,
+) -> None:
+    """DatasetManifest accommodates arbitrary spatial domain shapes via proper dictionary validation."""
+    d = sample_dataset_manifest.to_dict()
+    d["spatial_metadata"] = {"axes": ["x"], "shape": [42]}
+    tiny_manifest = DatasetManifest.from_dict(d)
     assert tiny_manifest.spatial_metadata["shape"] == [42]
 
 
-# Backward compat alias
-test_dataset_manifest_does_not_require_fixed_grid_shape = test_dataset_manifest_has_no_fixed_grid_requirement
+def test_dataset_splits_are_disjoint(sample_dataset_manifest: DatasetManifest) -> None:
+    """Trajectory IDs across dataset splits must be strictly pairwise disjoint."""
+    d = sample_dataset_manifest.to_dict()
+    # Introduce an overlap: traj_001 in both train and test
+    d["split_trajectory_ids"] = {
+        "train": ["traj_001", "traj_002"],
+        "valid": ["traj_003"],
+        "test": ["traj_001", "traj_004"],
+    }
+    with pytest.raises(InvalidInputError, match="split collision: trajectory 'traj_001' appears in multiple splits"):
+        DatasetManifest.from_dict(d)
 
 
 def test_model_capabilities_roundtrip() -> None:

@@ -71,6 +71,21 @@ class HistorySelection(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="after")
+    def validate_history_params(self) -> HistorySelection:
+        if self.window_size is not None and self.window_size <= 0:
+            raise InvalidInputError(f"HistorySelection window_size must be > 0, got {self.window_size}.")
+        if self.step is not None and self.step <= 0:
+            raise InvalidInputError(f"HistorySelection step must be > 0, got {self.step}.")
+        if self.history_offsets is not None:
+            if not self.history_offsets:
+                raise InvalidInputError("HistorySelection history_offsets list must not be empty if provided.")
+            if any(offset > 0 for offset in self.history_offsets):
+                raise InvalidInputError(
+                    f"HistorySelection history_offsets must be non-positive (<= 0), got {self.history_offsets}."
+                )
+        return self
+
 
 class TargetTimePolicy(BaseModel):
     """Specification of future target evaluation horizons."""
@@ -97,6 +112,29 @@ class TargetTimePolicy(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_target_params(self) -> TargetTimePolicy:
+        if self.horizon is not None and self.horizon <= 0:
+            raise InvalidInputError(f"TargetTimePolicy horizon must be > 0, got {self.horizon}.")
+        if self.step is not None and self.step <= 0:
+            raise InvalidInputError(f"TargetTimePolicy step must be > 0, got {self.step}.")
+        if self.target_offsets is not None:
+            if any(offset <= 0 for offset in self.target_offsets):
+                raise InvalidInputError(
+                    f"TargetTimePolicy target_offsets must be strictly positive (> 0), got {self.target_offsets}."
+                )
+        if self.lead_times is not None:
+            if any(lt <= 0 for lt in self.lead_times):
+                raise InvalidInputError(
+                    f"TargetTimePolicy lead_times must be strictly positive (> 0), got {self.lead_times}."
+                )
+        if self.horizon is not None and self.lead_times is not None:
+            if self.horizon != len(self.lead_times):
+                raise InvalidInputError(
+                    f"TargetTimePolicy horizon ({self.horizon}) contradicts len(lead_times) ({len(self.lead_times)})."
+                )
+        return self
 
 
 class StateKindPolicy(BaseModel):

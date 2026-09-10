@@ -42,8 +42,6 @@ def test_benchmark_protocol_is_independent_from_task_spec(
         })
 
 
-# Backward compat alias
-test_task_spec_and_benchmark_protocol_are_separate = test_benchmark_protocol_is_independent_from_task_spec
 
 
 def test_benchmark_protocol_roundtrip() -> None:

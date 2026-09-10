@@ -11,7 +11,11 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from world_model.contracts.common import generate_id
-from world_model.contracts.errors import InvalidInputError, SchemaMismatchError
+from world_model.contracts.errors import (
+    InvalidInputError,
+    SchemaMismatchError,
+    TimeRangeInvalidError,
+)
 from world_model.contracts.world_state import StateKind, WorldState
 
 
@@ -49,4 +53,12 @@ class PredictedTrajectory(BaseModel):
                     f"All states in PredictedTrajectory must strictly have state_kind='predicted'.",
                     details={"index": idx, "state_id": state.state_id, "state_kind": state.state_kind},
                 )
+
+        for i in range(len(self.states) - 1):
+            if self.states[i].timestamp >= self.states[i + 1].timestamp:
+                raise TimeRangeInvalidError(
+                    f"PredictedTrajectory timestamps must be strictly monotonic increasing: "
+                    f"{self.states[i].timestamp} >= {self.states[i + 1].timestamp}"
+                )
+
         return self

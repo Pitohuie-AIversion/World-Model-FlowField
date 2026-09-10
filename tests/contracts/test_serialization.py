@@ -7,7 +7,7 @@ import pytest
 from world_model.contracts.action import ActionSequence
 from world_model.contracts.benchmark import BenchmarkProtocol
 from world_model.contracts.common import SCHEMA_VERSION_DEFAULT
-from world_model.contracts.errors import SchemaMismatchError
+from world_model.contracts.errors import InvalidInputError, SchemaMismatchError
 from world_model.contracts.manifests import (
     DatasetManifest,
     ModelCapabilities,
@@ -39,6 +39,22 @@ def test_schema_version_is_serialized(sample_ground_truth_world_state: WorldStat
     assert d["schema_version"] == "1.8.0"
 
 
+def test_schema_version_accepts_current_version(sample_ground_truth_world_state: WorldState) -> None:
+    """Explicitly providing the current schema_version ('1.8.0') is accepted."""
+    d = sample_ground_truth_world_state.to_dict()
+    d["schema_version"] = "1.8.0"
+    restored = WorldState.from_dict(d)
+    assert restored.schema_version == "1.8.0"
+
+
+def test_schema_version_rejects_unsupported_version(sample_ground_truth_world_state: WorldState) -> None:
+    """Supplying an incompatible schema_version (e.g. 999.0.0) must fail closed with SchemaMismatchError."""
+    d = sample_ground_truth_world_state.to_dict()
+    d["schema_version"] = "999.0.0"
+    with pytest.raises(SchemaMismatchError, match="Schema version mismatch"):
+        WorldState.from_dict(d)
+
+
 def test_mismatched_contract_type_raises_error() -> None:
     """Deserializing a payload with a mismatched contract_type must fail closed."""
     with pytest.raises(SchemaMismatchError, match="Contract type mismatch"):
@@ -49,6 +65,42 @@ def test_mismatched_contract_type_raises_error() -> None:
             "state_kind": "observed",
             "timestamp": "2026-09-10T12:00:00Z",
         })
+
+
+def test_json_rejects_nan(sample_ground_truth_world_state: WorldState) -> None:
+    """NaN values in contract payloads must be rejected upon serialization or deserialization."""
+    d = sample_ground_truth_world_state.to_dict()
+    d["provenance"] = {"residual": float("nan")}
+    with pytest.raises(InvalidInputError, match="NaN/Infinity"):
+        WorldState.from_dict(d)
+
+    bad_json = '{"contract_type": "WorldState", "schema_version": "1.8.0", "state_id": "ws_nan", "state_kind": "observed", "timestamp": "2026-09-10T12:00:00Z", "components": {}, "lineage": {}, "provenance": {"val": NaN}}'
+    with pytest.raises(InvalidInputError, match="NaN/Infinity"):
+        WorldState.from_json(bad_json)
+
+
+def test_json_rejects_positive_inf(sample_ground_truth_world_state: WorldState) -> None:
+    """Positive infinity float values must be rejected fail-closed."""
+    d = sample_ground_truth_world_state.to_dict()
+    d["provenance"] = {"divergence": float("inf")}
+    with pytest.raises(InvalidInputError, match="NaN/Infinity"):
+        WorldState.from_dict(d)
+
+    bad_json = '{"contract_type": "WorldState", "schema_version": "1.8.0", "state_id": "ws_inf", "state_kind": "observed", "timestamp": "2026-09-10T12:00:00Z", "components": {}, "lineage": {}, "provenance": {"val": Infinity}}'
+    with pytest.raises(InvalidInputError, match="NaN/Infinity"):
+        WorldState.from_json(bad_json)
+
+
+def test_json_rejects_negative_inf(sample_ground_truth_world_state: WorldState) -> None:
+    """Negative infinity float values must be rejected fail-closed."""
+    d = sample_ground_truth_world_state.to_dict()
+    d["provenance"] = {"bound": float("-inf")}
+    with pytest.raises(InvalidInputError, match="NaN/Infinity"):
+        WorldState.from_dict(d)
+
+    bad_json = '{"contract_type": "WorldState", "schema_version": "1.8.0", "state_id": "ws_ninf", "state_kind": "observed", "timestamp": "2026-09-10T12:00:00Z", "components": {}, "lineage": {}, "provenance": {"val": -Infinity}}'
+    with pytest.raises(InvalidInputError, match="NaN/Infinity"):
+        WorldState.from_json(bad_json)
 
 
 def test_timezone_preservation_in_roundtrip(sample_ground_truth_world_state: WorldState) -> None:

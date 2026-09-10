@@ -71,6 +71,37 @@ class GridSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="after")
+    def validate_grid_spec_invariants(self) -> GridSpec:
+        if len(self.axes) != len(set(self.axes)):
+            raise InvalidInputError(
+                f"GridSpec axes must not contain duplicate names: {self.axes}"
+            )
+
+        if self.shape is not None:
+            if any(dim <= 0 for dim in self.shape):
+                raise InvalidInputError(
+                    f"GridSpec shape dimensions must be strictly positive (> 0), got {self.shape}."
+                )
+            if len(self.shape) != len(self.axes):
+                raise InvalidInputError(
+                    f"GridSpec len(shape) ({len(self.shape)}) must match len(axes) ({len(self.axes)})."
+                )
+
+        if len(self.periodic_axes) != len(set(self.periodic_axes)):
+            raise InvalidInputError(
+                f"GridSpec periodic_axes must not contain duplicate names: {self.periodic_axes}"
+            )
+
+        axes_set = set(self.axes)
+        for p_axis in self.periodic_axes:
+            if p_axis not in axes_set:
+                raise InvalidInputError(
+                    f"GridSpec periodic axis '{p_axis}' is not declared in axes {self.axes}."
+                )
+
+        return self
+
 
 class StaticConditions(BaseModel):
     """Time-invariant physical context driving dynamics."""

@@ -22,9 +22,10 @@ from world_model.contracts.common import (
 from world_model.contracts.errors import (
     InvalidInputError,
     OutputModeUnsupportedError,
+    SchemaMismatchError,
     TimeRangeInvalidError,
 )
-from world_model.contracts.task_spec import TransitionTaskSpec
+from world_model.contracts.task_spec import ActionPolicy, TransitionTaskSpec
 from world_model.contracts.trajectory import PredictedTrajectory
 from world_model.contracts.world_context import WorldContext
 from world_model.contracts.world_state import WorldState
@@ -35,6 +36,64 @@ class OutputMode(str, Enum):
 
     DETERMINISTIC = "deterministic"
     ENSEMBLE = "ensemble"
+
+
+class PredictionValidity(BaseModel):
+    """Explicit validity and convergence diagnostic bounds for prediction."""
+
+    status: str = Field(
+        default="valid",
+        description="Validity status: valid | invalid | degraded",
+    )
+    horizon_supported: bool = Field(
+        default=True,
+        description="Whether rollout horizon is within supported bounds",
+    )
+    spatial_domain_supported: bool = Field(
+        default=True,
+        description="Whether spatial domain resolution and geometry are supported",
+    )
+    condition_coverage_ok: bool = Field(
+        default=True,
+        description="Whether external temporal conditions covered the rollout interval",
+    )
+    validated_range_checks: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Component-level physical parameter validity checks",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Diagnostic warning messages",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class UncertaintySummary(BaseModel):
+    """Explicit calibration and uncertainty quantification metadata."""
+
+    method: str = Field(
+        default="none",
+        description="Quantification method: none | ensemble | mc_dropout | gaussian",
+    )
+    calibrated: bool = Field(
+        default=False,
+        description="Whether uncertainty estimates have been empirically calibrated (K > 1 != calibrated)",
+    )
+    num_trajectories: int = Field(
+        default=1,
+        description="Number of trajectories used for uncertainty quantification",
+    )
+    statistics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Summary statistics (variance, confidence intervals, entropy)",
+    )
+    calibration_ref: Optional[str] = Field(
+        default=None,
+        description="Reference to calibration certificate or protocol artifact",
+    )
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PredictionOptions(BaseModel):
@@ -122,7 +181,7 @@ class PredictionRequest(ContractBase):
     )
 
     @model_validator(mode="after")
-    def validate_exactly_one_of_references(self) -> PredictionRequest:
+    def validate_request_invariants(self) -> PredictionRequest:
         # 1. state_history_ref XOR state_history
         has_sh_ref = self.state_history_ref is not None
         has_sh_val = self.state_history is not None
@@ -153,12 +212,43 @@ class PredictionRequest(ContractBase):
         if not self.target_times:
             raise InvalidInputError("PredictionRequest target_times must not be empty.")
 
-        # Check monotonic increasing
+        # Check target_times strictly monotonic increasing
         for i in range(len(self.target_times) - 1):
             if self.target_times[i] >= self.target_times[i + 1]:
                 raise TimeRangeInvalidError(
                     f"PredictionRequest target_times must be strictly monotonic increasing: "
                     f"{self.target_times[i]} >= {self.target_times[i + 1]}"
+                )
+
+        # Inline state_history temporal validation and causality
+        if self.state_history is not None:
+            if not self.state_history:
+                raise InvalidInputError("PredictionRequest inline state_history must not be empty.")
+
+            for i in range(len(self.state_history) - 1):
+                if self.state_history[i].timestamp >= self.state_history[i + 1].timestamp:
+                    raise TimeRangeInvalidError(
+                        f"PredictionRequest state_history timestamps must be strictly monotonic increasing: "
+                        f"{self.state_history[i].timestamp} >= {self.state_history[i + 1].timestamp}"
+                    )
+
+            last_hist_t = self.state_history[-1].timestamp
+            first_target_t = self.target_times[0]
+            if first_target_t <= last_hist_t:
+                raise TimeRangeInvalidError(
+                    f"Causal violation: first target timestamp ({first_target_t}) "
+                    f"must be strictly after last history timestamp ({last_hist_t})."
+                )
+
+        # Inline task_spec action_policy consistency
+        if self.task_spec is not None:
+            if self.task_spec.action_policy == ActionPolicy.NONE and self.actions is not None:
+                raise InvalidInputError(
+                    "TaskSpec specifies ActionPolicy.NONE, but an actions sequence was provided in PredictionRequest."
+                )
+            if self.task_spec.action_policy == ActionPolicy.REQUIRED and self.actions is None:
+                raise InvalidInputError(
+                    "TaskSpec specifies ActionPolicy.REQUIRED, but no actions sequence was provided in PredictionRequest."
                 )
 
         return self
@@ -193,11 +283,11 @@ class WorldPrediction(ContractBase):
         ...,
         description="List of predicted rollout trajectories [1..K]",
     )
-    uncertainty_summary: Optional[dict[str, Any]] = Field(
+    uncertainty_summary: Optional[UncertaintySummary] = Field(
         default=None,
         description="Calibration and uncertainty quantification metadata",
     )
-    validity: Optional[dict[str, Any]] = Field(
+    validity: Optional[PredictionValidity] = Field(
         default=None,
         description="Prediction validity and convergence diagnostic bounds",
     )
@@ -226,4 +316,19 @@ class WorldPrediction(ContractBase):
     def validate_trajectories_invariant(self) -> WorldPrediction:
         if self.status == "success" and not self.trajectories:
             raise InvalidInputError("Successful WorldPrediction must contain at least one trajectory.")
+
+        # Lineage consistency: every state in every trajectory must have parent_prediction_id matching self.prediction_id
+        for traj_idx, traj in enumerate(self.trajectories):
+            for state_idx, state in enumerate(traj.states):
+                if state.lineage.parent_prediction_id != self.prediction_id:
+                    raise SchemaMismatchError(
+                        f"State lineage parent_prediction_id '{state.lineage.parent_prediction_id}' at "
+                        f"trajectory {traj_idx} state {state_idx} (state_id='{state.state_id}') "
+                        f"does not match WorldPrediction prediction_id '{self.prediction_id}'.",
+                        details={
+                            "prediction_id": self.prediction_id,
+                            "parent_prediction_id": state.lineage.parent_prediction_id,
+                            "state_id": state.state_id,
+                        },
+                    )
         return self

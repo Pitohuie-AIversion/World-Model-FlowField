@@ -204,6 +204,26 @@ class WorldState(ContractBase):
                 )
         return self
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Prevent in-place mutation of identity and semantic provenance fields."""
+        if hasattr(self, "__pydantic_fields_set__") and name in (
+            "state_id",
+            "state_kind",
+            "timestamp",
+            "lineage",
+        ):
+            if name == "state_kind":
+                current_kind = getattr(self, "state_kind", None)
+                if current_kind == StateKind.PREDICTED:
+                    raise InvalidInputError(
+                        f"Predicted WorldState (id={getattr(self, 'state_id', 'unknown')}) cannot be "
+                        f"mutated in-place to '{value}'. Real facts require separate observation/estimation states."
+                    )
+            raise InvalidInputError(
+                f"WorldState semantic field '{name}' is immutable and cannot be reassigned in-place."
+            )
+        super().__setattr__(name, value)
+
     def assert_cannot_promote_to_fact(self, target_kind: StateKind) -> None:
         """Enforce that a predicted state cannot be automatically promoted to fact."""
         if self.state_kind == StateKind.PREDICTED and target_kind in (

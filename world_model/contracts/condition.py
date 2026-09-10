@@ -98,6 +98,26 @@ class ConditionSeries(BaseModel):
         if not self.timestamps:
             raise InvalidInputError("ConditionSeries timestamps list must not be empty.")
 
+        # Exactly one data source: values XOR artifact_ref
+        has_values = self.values is not None
+        has_artifact = self.artifact_ref is not None and bool(str(self.artifact_ref).strip())
+        if has_values == has_artifact:
+            raise InvalidInputError(
+                f"ConditionSeries must specify exactly one data source: values XOR artifact_ref. "
+                f"Got values={'provided' if has_values else 'None'}, "
+                f"artifact_ref={'provided' if has_artifact else 'None'}."
+            )
+
+        # Inline values must be list/tuple matching timestamps length
+        if self.values is not None:
+            if not isinstance(self.values, (list, tuple)):
+                raise InvalidInputError("ConditionSeries inline values must be a list or tuple.")
+            if len(self.values) != len(self.timestamps):
+                raise InvalidInputError(
+                    f"ConditionSeries values length ({len(self.values)}) must match "
+                    f"timestamps length ({len(self.timestamps)})."
+                )
+
         # Check strictly monotonic increasing
         for i in range(len(self.timestamps) - 1):
             if self.timestamps[i] >= self.timestamps[i + 1]:
@@ -111,6 +131,11 @@ class ConditionSeries(BaseModel):
             if t_start > t_end:
                 raise TimeRangeInvalidError(
                     f"Invalid validity_interval: start {t_start} > end {t_end}"
+                )
+            if t_start > self.timestamps[0] or t_end < self.timestamps[-1]:
+                raise TimeRangeInvalidError(
+                    f"ConditionSeries validity_interval [{t_start}, {t_end}] must cover all sample timestamps "
+                    f"[{self.timestamps[0]}, {self.timestamps[-1]}]."
                 )
 
         return self

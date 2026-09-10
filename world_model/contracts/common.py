@@ -9,6 +9,7 @@ Provides:
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any, TypeVar
@@ -29,6 +30,25 @@ from world_model.contracts.errors import (
 )
 
 SCHEMA_VERSION_DEFAULT = "1.8.0"
+
+
+def _reject_constant(c: str) -> None:
+    raise InvalidInputError(f"Non-finite JSON constant '{c}' (NaN/Infinity) is forbidden in contract data.")
+
+
+def assert_finite_values(val: Any) -> None:
+    """Recursively ensure that no float value is NaN, +Inf, or -Inf."""
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            raise InvalidInputError(
+                f"Non-finite float value '{val}' (NaN/Infinity) is forbidden in contract data."
+            )
+    elif isinstance(val, dict):
+        for v in val.values():
+            assert_finite_values(v)
+    elif isinstance(val, (list, tuple, set)):
+        for v in val:
+            assert_finite_values(v)
 
 
 def validate_timezone_aware(dt: datetime) -> datetime:
@@ -100,21 +120,39 @@ class ContractBase(BaseModel):
         if "contract_type" not in values:
             values["contract_type"] = expected_type
 
+        # Check schema_version: fail closed on unsupported/mismatched version
+        provided_version = values.get("schema_version")
+        if provided_version is not None:
+            if provided_version != SCHEMA_VERSION_DEFAULT:
+                raise SchemaMismatchError(
+                    f"Schema version mismatch: expected '{SCHEMA_VERSION_DEFAULT}', got '{provided_version}'",
+                    details={"expected": SCHEMA_VERSION_DEFAULT, "provided": provided_version},
+                )
+        else:
+            values["schema_version"] = SCHEMA_VERSION_DEFAULT
+
         return values
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize contract to a JSON-compatible dictionary."""
-        return self.model_dump(mode="json")
+        d = self.model_dump(mode="json")
+        assert_finite_values(d)
+        return d
 
     def to_json(self, indent: int | None = None) -> str:
         """Serialize contract to a JSON formatted string."""
-        return self.model_dump_json(indent=indent)
+        d = self.to_dict()
+        try:
+            return json.dumps(d, indent=indent, allow_nan=False)
+        except ValueError as e:
+            raise InvalidInputError(f"Failed to serialize {self.__class__.__name__} to JSON: {e}") from e
 
     @classmethod
     def from_dict(cls: type[T], data: dict[str, Any]) -> T:
         """Construct contract from a dictionary with strict validation."""
         if not isinstance(data, dict):
             raise InvalidInputError(f"Expected dict input for {cls.__name__}, got {type(data)}")
+        assert_finite_values(data)
         try:
             return cls.model_validate(data)
         except ValidationError as e:
@@ -126,7 +164,9 @@ class ContractBase(BaseModel):
         if not isinstance(json_str, (str, bytes)):
             raise InvalidInputError(f"Expected JSON str/bytes for {cls.__name__}, got {type(json_str)}")
         try:
-            data = json.loads(json_str)
+            data = json.loads(json_str, parse_constant=_reject_constant)
+        except InvalidInputError:
+            raise
         except Exception as e:
             raise InvalidInputError(f"Malformed JSON string for {cls.__name__}: {e}") from e
         return cls.from_dict(data)

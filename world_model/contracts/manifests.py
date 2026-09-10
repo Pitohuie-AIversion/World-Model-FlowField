@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from world_model.contracts.common import ContractBase
+from world_model.contracts.errors import InvalidInputError
 from world_model.contracts.world_state import StateKind
 
 
@@ -47,6 +48,21 @@ class DatasetManifest(ContractBase):
         default=None,
         description="Reference to normalizer statistics computed exclusively on training split",
     )
+
+    @model_validator(mode="after")
+    def validate_splits_pairwise_disjoint(self) -> DatasetManifest:
+        seen: dict[str, str] = {}
+        for split_name, traj_ids in self.split_trajectory_ids.items():
+            for tid in traj_ids:
+                if tid in seen:
+                    prev_split = seen[tid]
+                    raise InvalidInputError(
+                        f"DatasetManifest split collision: trajectory '{tid}' appears in multiple splits: "
+                        f"'{prev_split}' and '{split_name}'. Split sets must be pairwise disjoint.",
+                        details={"trajectory_id": tid, "conflicting_splits": [prev_split, split_name]},
+                    )
+                seen[tid] = split_name
+        return self
 
 
 class ModelCapabilities(BaseModel):

@@ -64,8 +64,6 @@ def test_transition_sample_derives_times_from_states(
     assert restored.target_times == [t_target]
 
 
-# Backward compat alias
-test_transition_sample_uses_state_timestamps = test_transition_sample_derives_times_from_states
 
 
 def test_transition_sample_forbids_stored_history_times(
@@ -149,7 +147,3 @@ def test_transition_sample_rejects_target_before_history(
             target_states=[_make_state(t1, "ws_t_equal")],  # t1 == t1!
             trajectory_id="traj_001",
         )
-
-
-# Backward compat alias
-test_transition_sample_causality_validation = test_transition_sample_rejects_target_before_history

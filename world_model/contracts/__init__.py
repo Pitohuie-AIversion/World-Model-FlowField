@@ -40,6 +40,8 @@ from world_model.contracts.prediction import (
     OutputMode,
     PredictionOptions,
     PredictionRequest,
+    PredictionValidity,
+    UncertaintySummary,
     WorldPrediction,
 )
 from world_model.contracts.task_spec import (
@@ -52,6 +54,10 @@ from world_model.contracts.task_spec import (
 )
 from world_model.contracts.trajectory import PredictedTrajectory
 from world_model.contracts.transition import TransitionSample
+from world_model.contracts.validation import (
+    validate_prediction_against_request,
+    validate_resolved_request,
+)
 from world_model.contracts.world_context import (
     GridSpec,
     StaticConditions,
@@ -125,7 +131,12 @@ __all__ = [
     "OutputMode",
     "PredictionOptions",
     "PredictionRequest",
+    "PredictionValidity",
+    "UncertaintySummary",
     "WorldPrediction",
+    # Validation
+    "validate_resolved_request",
+    "validate_prediction_against_request",
     # Manifests
     "DatasetManifest",
     "ModelCapabilities",

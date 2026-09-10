@@ -50,7 +50,16 @@ def test_world_state_rejects_naive_timestamp(sample_fluid_state) -> None:
         )
 
 
-test_world_state_requires_timezone_aware_timestamp = test_world_state_rejects_naive_timestamp
+def test_predicted_state_cannot_be_mutated_to_observed(sample_predicted_world_state: WorldState) -> None:
+    """In-place mutation of a predicted WorldState to observed must be rejected."""
+    with pytest.raises(InvalidInputError, match="cannot be mutated in-place"):
+        sample_predicted_world_state.state_kind = StateKind.OBSERVED
+
+
+def test_predicted_state_cannot_be_mutated_to_estimated(sample_predicted_world_state: WorldState) -> None:
+    """In-place mutation of a predicted WorldState to estimated must be rejected."""
+    with pytest.raises(InvalidInputError, match="cannot be mutated in-place"):
+        sample_predicted_world_state.state_kind = StateKind.ESTIMATED
 
 
 def test_fluid_state_does_not_require_fixed_channels() -> None:

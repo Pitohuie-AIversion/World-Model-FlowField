@@ -53,7 +53,37 @@ def test_world_context_has_no_state_or_target_time(sample_world_context: WorldCo
         })
 
 
-test_world_context_has_no_target_times = test_world_context_has_no_state_or_target_time
+def test_grid_spec_shape_matches_axes() -> None:
+    """GridSpec shape length must equal axes length, dimensions must be > 0, and axes must not repeat."""
+    # Mismatched lengths: 2 axes, 3 shape dims
+    with pytest.raises(InvalidInputError, match="len\\(shape\\) .* must match len\\(axes\\)"):
+        GridSpec(grid_id="g1", axes=["y", "x"], shape=[128, 256, 10])
+
+    # Non-positive shape dimension
+    with pytest.raises(InvalidInputError, match="shape dimensions must be strictly positive"):
+        GridSpec(grid_id="g2", axes=["y", "x"], shape=[128, 0])
+
+    with pytest.raises(InvalidInputError, match="shape dimensions must be strictly positive"):
+        GridSpec(grid_id="g3", axes=["y", "x"], shape=[-128, 256])
+
+    # Duplicate axis names
+    with pytest.raises(InvalidInputError, match="axes must not contain duplicate names"):
+        GridSpec(grid_id="g4", axes=["x", "x"], shape=[10, 10])
+
+
+def test_grid_spec_periodic_axes_are_valid() -> None:
+    """GridSpec periodic_axes must be a non-duplicate subset of axes."""
+    # Periodic axis not in axes
+    with pytest.raises(InvalidInputError, match="periodic axis 'z' is not declared in axes"):
+        GridSpec(grid_id="g5", axes=["y", "x"], periodic_axes=["x", "z"])
+
+    # Duplicate periodic axis
+    with pytest.raises(InvalidInputError, match="periodic_axes must not contain duplicate names"):
+        GridSpec(grid_id="g6", axes=["y", "x"], periodic_axes=["x", "x"])
+
+    # Valid subset
+    grid = GridSpec(grid_id="g7", axes=["z", "y", "x"], shape=[32, 64, 128], periodic_axes=["x", "y"])
+    assert grid.periodic_axes == ["x", "y"]
 
 
 def test_world_context_roundtrip(sample_world_context: WorldContext) -> None:
