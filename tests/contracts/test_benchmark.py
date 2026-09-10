@@ -7,7 +7,7 @@ from world_model.contracts.errors import InvalidInputError
 from world_model.contracts.task_spec import TransitionTaskSpec
 
 
-def test_task_spec_and_benchmark_protocol_are_separate(
+def test_benchmark_protocol_is_independent_from_task_spec(
     sample_task_spec: TransitionTaskSpec,
 ) -> None:
     """BenchmarkProtocol and TransitionTaskSpec must maintain strict separation of concerns."""
@@ -40,6 +40,10 @@ def test_task_spec_and_benchmark_protocol_are_separate(
             "target_time_policy": {"horizon": 1},
             "metric_suite": ["relative_l2"],
         })
+
+
+# Backward compat alias
+test_task_spec_and_benchmark_protocol_are_separate = test_benchmark_protocol_is_independent_from_task_spec
 
 
 def test_benchmark_protocol_roundtrip() -> None:

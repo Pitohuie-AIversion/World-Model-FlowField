@@ -26,7 +26,7 @@ def test_transition_task_spec_roundtrip(sample_task_spec: TransitionTaskSpec) ->
     assert restored.history_selection.window_size == 4
 
 
-def test_task_spec_forbids_split_and_metrics() -> None:
+def test_transition_task_spec_has_no_benchmark_settings() -> None:
     """TransitionTaskSpec must not own dataset split, metrics, or compute budget."""
     with pytest.raises(InvalidInputError, match="must not define 'dataset_split'"):
         TransitionTaskSpec.from_dict({
@@ -43,3 +43,7 @@ def test_task_spec_forbids_split_and_metrics() -> None:
             "history_selection": {"window_size": 2},
             "target_time_policy": {"horizon": 1},
         })
+
+
+# Backward compat alias
+test_task_spec_forbids_split_and_metrics = test_transition_task_spec_has_no_benchmark_settings

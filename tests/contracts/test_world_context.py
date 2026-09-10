@@ -10,11 +10,13 @@ from world_model.contracts.world_context import (
 )
 
 
-def test_world_context_has_no_target_times(sample_world_context: WorldContext) -> None:
-    """WorldContext must not contain target_times, history_times, or dataset splits."""
+def test_world_context_has_no_state_or_target_time(sample_world_context: WorldContext) -> None:
+    """WorldContext must not contain state_timestamp, target_times, history_times, or dataset splits."""
     # Attribute check
     assert not hasattr(sample_world_context, "target_times")
     assert not hasattr(sample_world_context, "history_times")
+    assert not hasattr(sample_world_context, "state_timestamp")
+    assert not hasattr(sample_world_context, "timestamp")
     assert not hasattr(sample_world_context, "dataset_split")
 
     # Initialization with forbidden keys must fail
@@ -22,6 +24,14 @@ def test_world_context_has_no_target_times(sample_world_context: WorldContext) -
         WorldContext.from_dict({
             "context_id": "wc_invalid",
             "target_times": ["2026-09-10T12:00:00Z"],
+            "static_conditions": {},
+            "temporal_conditions": {},
+        })
+
+    with pytest.raises(InvalidInputError, match="must not contain 'state_timestamp'"):
+        WorldContext.from_dict({
+            "context_id": "wc_invalid",
+            "state_timestamp": "2026-09-10T12:00:00Z",
             "static_conditions": {},
             "temporal_conditions": {},
         })
@@ -41,6 +51,9 @@ def test_world_context_has_no_target_times(sample_world_context: WorldContext) -
             "static_conditions": {},
             "temporal_conditions": {},
         })
+
+
+test_world_context_has_no_target_times = test_world_context_has_no_state_or_target_time
 
 
 def test_world_context_roundtrip(sample_world_context: WorldContext) -> None:

@@ -38,7 +38,7 @@ def test_world_state_roundtrip(sample_ground_truth_world_state: WorldState) -> N
     assert restored_json.state_kind == StateKind.SIMULATED_GROUND_TRUTH
 
 
-def test_world_state_requires_timezone_aware_timestamp(sample_fluid_state) -> None:
+def test_world_state_rejects_naive_timestamp(sample_fluid_state) -> None:
     """Naive datetime timestamps must be rejected immediately."""
     naive_time = datetime(2026, 9, 10, 12, 0, 0)  # No tzinfo!
 
@@ -48,6 +48,46 @@ def test_world_state_requires_timezone_aware_timestamp(sample_fluid_state) -> No
             state_kind=StateKind.OBSERVED,
             timestamp=naive_time,
         )
+
+
+test_world_state_requires_timezone_aware_timestamp = test_world_state_rejects_naive_timestamp
+
+
+def test_fluid_state_does_not_require_fixed_channels() -> None:
+    """FluidState accepts arbitrary canonical channels, not hardcoded to four."""
+    from world_model.contracts.world_state import FluidState
+
+    # 2-channel fluid state (e.g. 2D velocity only)
+    fluid_2ch = FluidState(
+        fields={
+            "velocity.x": FieldRef(inline_value=[1.0, 2.0]),
+            "velocity.y": FieldRef(inline_value=[0.5, -0.5]),
+        },
+        spatial_ref="grid_2d",
+    )
+    assert len(fluid_2ch.fields) == 2
+    assert "velocity.x" in fluid_2ch.fields
+    assert "pressure" not in fluid_2ch.fields
+
+    # Single-channel scalar state (e.g. pressure or tracer only)
+    fluid_1ch = FluidState(
+        fields={"pressure": FieldRef(inline_value=[101.3])},
+        spatial_ref="grid_scalar",
+    )
+    assert len(fluid_1ch.fields) == 1
+
+    # 5-channel state (e.g. 3D velocity + pressure + tracer)
+    fluid_5ch = FluidState(
+        fields={
+            "velocity.x": FieldRef(inline_value=[1.0]),
+            "velocity.y": FieldRef(inline_value=[2.0]),
+            "velocity.z": FieldRef(inline_value=[3.0]),
+            "pressure": FieldRef(inline_value=[100.0]),
+            "tracer": FieldRef(inline_value=[0.1]),
+        },
+        spatial_ref="grid_3d",
+    )
+    assert len(fluid_5ch.fields) == 5
 
 
 def test_predicted_state_remains_predicted(sample_predicted_world_state: WorldState) -> None:
