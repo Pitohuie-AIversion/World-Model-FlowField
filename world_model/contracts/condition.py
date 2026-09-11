@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from world_model.contracts.common import TimezoneAwareDatetime
+from world_model.contracts.common import TimezoneAwareDatetime, validate_timezone_aware
 from world_model.contracts.errors import (
     ConditionCoverageInvalidError,
     InvalidInputError,
@@ -127,32 +127,60 @@ class ConditionSeries(BaseModel):
                 )
 
         if self.validity_interval is not None:
-            t_start, t_end = self.validity_interval
-            if t_start > t_end:
+            valid_start, valid_end = self.validity_interval
+            if valid_start > valid_end:
                 raise TimeRangeInvalidError(
-                    f"Invalid validity_interval: start {t_start} > end {t_end}"
+                    f"validity_interval start must not exceed end: "
+                    f"start {valid_start} > end {valid_end}"
                 )
-            if t_start > self.timestamps[0] or t_end < self.timestamps[-1]:
+            # Declared interval must overlap with sample support;
+            # narrowing is permitted, widening is clamped by get_effective_validity_interval().
+            overlap_start = max(self.timestamps[0], valid_start)
+            overlap_end = min(self.timestamps[-1], valid_end)
+            if overlap_start > overlap_end:
                 raise TimeRangeInvalidError(
-                    f"ConditionSeries validity_interval [{t_start}, {t_end}] must cover all sample timestamps "
-                    f"[{self.timestamps[0]}, {self.timestamps[-1]}]."
+                    f"validity_interval [{valid_start}, {valid_end}] does not overlap "
+                    f"sample support [{self.timestamps[0]}, {self.timestamps[-1]}]."
                 )
 
         return self
 
     def get_effective_validity_interval(self) -> tuple[datetime, datetime]:
-        """Return explicit validity_interval or min/max timestamps."""
-        if self.validity_interval is not None:
-            return self.validity_interval
-        return self.timestamps[0], self.timestamps[-1]
+        """Return the query interval for the declared extrapolation policy.
+
+        For FORBIDDEN: effective = samples ∩ declared (widening is clamped).
+        For other policies: declared interval is returned as-is (those policies
+        are not yet validated for correctness in this phase).
+        Without a declared interval, sample support is used.
+        """
+        sample_start = self.timestamps[0]
+        sample_end = self.timestamps[-1]
+
+        if self.validity_interval is None:
+            return sample_start, sample_end
+
+        valid_start, valid_end = self.validity_interval
+
+        if self.extrapolation_policy == ExtrapolationPolicy.FORBIDDEN:
+            effective_start = max(sample_start, valid_start)
+            effective_end = min(sample_end, valid_end)
+            if effective_start > effective_end:
+                raise TimeRangeInvalidError(
+                    "No effective coverage remains after interval intersection."
+                )
+            return effective_start, effective_end
+
+        # Preserve the existing interval representation for other policies.
+        # This branch does not implement or certify extrapolated values.
+        return valid_start, valid_end
 
     def validate_target_time(self, target_time: datetime) -> None:
         """Validate whether target_time is covered.
 
         Raises ConditionCoverageInvalidError if out of bounds and extrapolation is forbidden.
+        Uses the shared validate_timezone_aware() for consistent timezone checking.
         """
-        if target_time.tzinfo is None:
-            raise TimeRangeInvalidError("Target timestamp must be timezone-aware.")
+        validate_timezone_aware(target_time)
 
         t_min, t_max = self.get_effective_validity_interval()
         if target_time < t_min or target_time > t_max:

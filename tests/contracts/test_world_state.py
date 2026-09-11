@@ -152,3 +152,77 @@ def test_field_ref_exactly_one_storage() -> None:
     # Multiple provided -> error
     with pytest.raises(InvalidInputError):
         FieldRef(inline_value=[1.0], tensor_ref="tensor_key_01")
+
+
+def test_lineage_frozen_rejects_field_reassignment(base_utc_time: datetime) -> None:
+    """StateLineage frozen=True prevents reassigning parent_prediction_id after construction."""
+    from pydantic import ValidationError
+
+    lineage = StateLineage(
+        source_state_ids=["ws_0", "ws_1"],
+        parent_prediction_id="pred_original",
+    )
+
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        lineage.parent_prediction_id = "pred_tampered"
+
+    assert lineage.parent_prediction_id == "pred_original"
+
+
+def test_lineage_tuple_fields_reject_append(base_utc_time: datetime) -> None:
+    """StateLineage source_state_ids and source_observation_ids are tuples; .append() is impossible."""
+    lineage = StateLineage(
+        source_state_ids=["ws_0"],
+        source_observation_ids=["obs_0"],
+        parent_prediction_id="pred_01",
+    )
+
+    # Tuples have no .append() method
+    assert isinstance(lineage.source_state_ids, tuple)
+    assert isinstance(lineage.source_observation_ids, tuple)
+
+    with pytest.raises(AttributeError):
+        lineage.source_state_ids.append("ws_injected")  # type: ignore[attr-defined]
+
+    with pytest.raises(AttributeError):
+        lineage.source_observation_ids.append("obs_injected")  # type: ignore[attr-defined]
+
+    # Original values unchanged
+    assert lineage.source_state_ids == ("ws_0",)
+    assert lineage.source_observation_ids == ("obs_0",)
+
+
+def test_lineage_external_list_isolation(base_utc_time: datetime) -> None:
+    """Modifying the original list after StateLineage construction must not affect lineage."""
+    original_ids = ["ws_0", "ws_1"]
+    lineage = StateLineage(source_state_ids=original_ids, parent_prediction_id="pred_01")
+
+    # Mutate the external list
+    original_ids.append("ws_injected")
+    original_ids[0] = "ws_tampered"
+
+    # Lineage is isolated (tuple copy, not a reference to original list)
+    assert lineage.source_state_ids == ("ws_0", "ws_1")
+    assert len(lineage.source_state_ids) == 2
+
+
+def test_lineage_json_roundtrip_preserves_ids(sample_predicted_world_state: WorldState) -> None:
+    """WorldState → JSON → WorldState preserves lineage IDs, order, and parent relationship."""
+    # Construct a state with full lineage
+    state = WorldState(
+        state_id="ws_lineage_rt",
+        state_kind=StateKind.PREDICTED,
+        timestamp=sample_predicted_world_state.timestamp,
+        lineage=StateLineage(
+            source_state_ids=["ws_a", "ws_b", "ws_c"],
+            source_observation_ids=["obs_x"],
+            parent_prediction_id="pred_lineage_rt",
+        ),
+    )
+
+    json_str = state.to_json()
+    restored = WorldState.from_json(json_str)
+
+    assert restored.lineage.source_state_ids == ("ws_a", "ws_b", "ws_c")
+    assert restored.lineage.source_observation_ids == ("obs_x",)
+    assert restored.lineage.parent_prediction_id == "pred_lineage_rt"

@@ -129,14 +129,19 @@ class WorldComponents(BaseModel):
 
 
 class StateLineage(BaseModel):
-    """Provenance and generation history of a WorldState."""
+    """Immutable provenance snapshot for a WorldState.
 
-    source_state_ids: list[str] = Field(
-        default_factory=list,
+    All fields are frozen after construction. Container fields use tuples
+    (not lists) to prevent in-place mutation via .append() / .extend().
+    Pydantic non-strict mode coerces list inputs to tuples automatically.
+    """
+
+    source_state_ids: tuple[str, ...] = Field(
+        default_factory=tuple,
         description="IDs of previous states that produced this state",
     )
-    source_observation_ids: list[str] = Field(
-        default_factory=list,
+    source_observation_ids: tuple[str, ...] = Field(
+        default_factory=tuple,
         description="IDs of raw ObservationFrames used if state was estimated",
     )
     parent_prediction_id: Optional[str] = Field(
@@ -144,7 +149,7 @@ class StateLineage(BaseModel):
         description="ID of WorldPrediction that generated this state (required if predicted)",
     )
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class WorldState(ContractBase):

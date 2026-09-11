@@ -112,34 +112,90 @@ def test_condition_series_inline_values_match_timestamps(base_utc_time: datetime
         )
 
 
-def test_condition_series_validity_interval_covers_samples(base_utc_time: datetime) -> None:
-    """If validity_interval is declared, it must cover [timestamps[0], timestamps[-1]]."""
-    t0 = base_utc_time
-    t1 = t0 + timedelta(seconds=10)
+def test_condition_series_forbidden_effective_interval(base_utc_time: datetime) -> None:
+    """FORBIDDEN effective interval = samples ∩ declared.
 
-    # Start after first timestamp -> fail
-    with pytest.raises(TimeRangeInvalidError, match="must cover all sample timestamps"):
-        ConditionSeries(
-            condition_spec_ref="spec_test",
-            timestamps=[t0, t1],
-            values=[1.0, 2.0],
-            validity_interval=(t0 + timedelta(seconds=1), t1),
-        )
+    Correction: the old requirement that validity_interval must cover all
+    sample timestamps was inaccurate. Under FORBIDDEN, widening the declared
+    interval beyond sample support must NOT extend coverage. Narrowing is
+    permitted and shrinks the queryable range.
 
-    # End before last timestamp -> fail
-    with pytest.raises(TimeRangeInvalidError, match="must cover all sample timestamps"):
-        ConditionSeries(
-            condition_spec_ref="spec_test",
-            timestamps=[t0, t1],
-            values=[1.0, 2.0],
-            validity_interval=(t0, t1 - timedelta(seconds=1)),
-        )
+    Acceptance matrix (seconds relative to base_utc_time):
+        samples    declared      effective    must-pass   must-reject
+        [0,10]     None          [0,10]       0,10        -1,11
+        [0,10]     [-5,15]       [0,10]       0,10        -1,11
+        [0,10]     [2,8]         [2,8]        2,5,8       1,9
+        [0,10]     [8,2]         (invalid)    —           construct fails
+        [0,10]     [20,30]       (no overlap) —           construct fails
+        [5]        [0,10]        [5,5]        5           4,6
+    """
+    t = lambda s: base_utc_time + timedelta(seconds=s)  # noqa: E731
 
-    # Covering interval -> success
-    series = ConditionSeries(
-        condition_spec_ref="spec_test",
-        timestamps=[t0, t1],
-        values=[1.0, 2.0],
-        validity_interval=(t0 - timedelta(seconds=5), t1 + timedelta(seconds=5)),
+    # --- Case 1: No declared interval → effective = sample support [0, 10] ---
+    s1 = ConditionSeries(
+        condition_spec_ref="spec", timestamps=[t(0), t(10)], values=[1.0, 2.0],
+        extrapolation_policy=ExtrapolationPolicy.FORBIDDEN,
     )
-    assert series.validity_interval is not None
+    assert s1.get_effective_validity_interval() == (t(0), t(10))
+    s1.validate_target_time(t(0))
+    s1.validate_target_time(t(10))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s1.validate_target_time(t(-1))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s1.validate_target_time(t(11))
+
+    # --- Case 2: Widened interval [-5, 15] → effective clamped to [0, 10] ---
+    s2 = ConditionSeries(
+        condition_spec_ref="spec", timestamps=[t(0), t(10)], values=[1.0, 2.0],
+        extrapolation_policy=ExtrapolationPolicy.FORBIDDEN,
+        validity_interval=(t(-5), t(15)),
+    )
+    assert s2.get_effective_validity_interval() == (t(0), t(10))
+    s2.validate_target_time(t(0))
+    s2.validate_target_time(t(10))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s2.validate_target_time(t(-1))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s2.validate_target_time(t(11))
+
+    # --- Case 3: Narrowed interval [2, 8] → effective = [2, 8] ---
+    s3 = ConditionSeries(
+        condition_spec_ref="spec", timestamps=[t(0), t(10)], values=[1.0, 2.0],
+        extrapolation_policy=ExtrapolationPolicy.FORBIDDEN,
+        validity_interval=(t(2), t(8)),
+    )
+    assert s3.get_effective_validity_interval() == (t(2), t(8))
+    s3.validate_target_time(t(2))
+    s3.validate_target_time(t(5))
+    s3.validate_target_time(t(8))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s3.validate_target_time(t(1))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s3.validate_target_time(t(9))
+
+    # --- Case 4: Inverted interval [8, 2] → construction fails ---
+    with pytest.raises(TimeRangeInvalidError, match="start must not exceed end"):
+        ConditionSeries(
+            condition_spec_ref="spec", timestamps=[t(0), t(10)], values=[1.0, 2.0],
+            validity_interval=(t(8), t(2)),
+        )
+
+    # --- Case 5: No overlap [20, 30] → construction fails ---
+    with pytest.raises(TimeRangeInvalidError, match="does not overlap"):
+        ConditionSeries(
+            condition_spec_ref="spec", timestamps=[t(0), t(10)], values=[1.0, 2.0],
+            validity_interval=(t(20), t(30)),
+        )
+
+    # --- Case 6: Single-point sample [5] with declared [0, 10] → effective [5, 5] ---
+    s6 = ConditionSeries(
+        condition_spec_ref="spec", timestamps=[t(5)], values=[1.0],
+        extrapolation_policy=ExtrapolationPolicy.FORBIDDEN,
+        validity_interval=(t(0), t(10)),
+    )
+    assert s6.get_effective_validity_interval() == (t(5), t(5))
+    s6.validate_target_time(t(5))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s6.validate_target_time(t(4))
+    with pytest.raises(ConditionCoverageInvalidError):
+        s6.validate_target_time(t(6))

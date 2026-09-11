@@ -482,3 +482,46 @@ def test_uncertainty_summary_not_calibrated_by_default() -> None:
     assert u.calibrated is False
     assert u.method == "none"
     assert u.num_trajectories == 1
+
+
+def test_world_prediction_lineage_immutable_through_inner_state(base_utc_time: datetime) -> None:
+    """Integration regression: lineage of states inside WorldPrediction cannot be tampered.
+
+    Steps:
+    1. Create a valid WorldPrediction with matching lineage.
+    2. Attempt to reassign parent_prediction_id on an inner state's lineage.
+    3. Verify the attempt raises ValidationError (frozen_instance).
+    4. Confirm the prediction's parent-child lineage integrity is still valid.
+    """
+    from pydantic import ValidationError
+    from world_model.contracts.validation import validate_prediction_against_request
+
+    pred_id = "pred_integration_lineage"
+    t1 = base_utc_time + timedelta(seconds=1)
+
+    state = _make_predicted_state(t1, state_id="ws_int", pred_id=pred_id)
+    traj = PredictedTrajectory(trajectory_id="traj_int", states=[state])
+    prediction = WorldPrediction(
+        prediction_id=pred_id,
+        request_id="req_int",
+        trajectories=[traj],
+    )
+
+    # Attempt to tamper with the lineage through the prediction's inner state
+    inner_state = prediction.trajectories[0].states[0]
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        inner_state.lineage.parent_prediction_id = "pred_tampered"
+
+    # After failed tampering, lineage is still consistent
+    assert inner_state.lineage.parent_prediction_id == pred_id
+
+    # Validate the prediction against its request to confirm integrity
+    req = PredictionRequest(
+        request_id="req_int",
+        state_history_ref="sh_01",
+        context_ref="wc_01",
+        task_spec_ref="ts_01",
+        target_times=[t1],
+    )
+    # This should succeed — lineage was not corrupted
+    validate_prediction_against_request(prediction, req)
